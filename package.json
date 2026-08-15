@@ -1,0 +1,35 @@
+{
+  "name": "malssumsoop",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc -b && vite build",
+    "check": "tsc -b --pretty false",
+    "test": "vitest run",
+    "icons": "node scripts/render_icons.mjs",
+    "deploy:dry": "npm run build && wrangler deploy --dry-run",
+    "deploy": "npm run build && wrangler deploy",
+    "cf-types": "wrangler types"
+  },
+  "dependencies": {
+    "@fontsource-variable/noto-sans": "^5.3.0",
+    "@fontsource/noto-serif": "^5.3.0",
+    "react": "^19.2.8",
+    "react-dom": "^19.2.8",
+    "sql.js": "^1.14.2"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^5.20260814.1",
+    "@types/react": "^19.2.18",
+    "@types/react-dom": "^19.2.4",
+    "@types/sql.js": "^1.4.11",
+    "@vitejs/plugin-react": "^6.0.5",
+    "sharp": "^0.35.3",
+    "typescript": "^7.0.2",
+    "vite": "^8.2.1",
+    "vitest": "^4.1.10",
+    "wrangler": "^4.123.0"
+  }
+}
