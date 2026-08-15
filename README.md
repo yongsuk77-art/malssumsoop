@@ -2,6 +2,8 @@
 
 설교자가 한 절을 번역본, 히브리어·헬라어 원문, 형태 분석, 스트롱 사전, 주석과 함께 읽고 설교의 중심을 정리할 수 있는 설치형 웹 성경입니다.
 
+**라이브 앱:** <https://malssumsoop.yongsuk77.workers.dev>
+
 ## 주요 기능
 
 - 구약 Open Scriptures Hebrew Bible, 신약 STEPBible TAGNT-TR 원문과 형태 분석

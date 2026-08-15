@@ -99,8 +99,25 @@ function isInsight(value: unknown): value is Insight {
 function responseText(value: unknown): string {
   if (typeof value === "string") return value;
   if (isRecord(value) && typeof value.response === "string") return value.response;
+  if (isRecord(value) && isRecord(value.response)) return JSON.stringify(value.response);
   throw new Error("AI response did not contain text");
 }
+
+const INSIGHT_SCHEMA = {
+  type: "object",
+  properties: {
+    summary: { type: "string" },
+    context: { type: "string" },
+    originalLanguage: { type: "string" },
+    theology: { type: "string" },
+    sermonBridge: { type: "string" },
+    application: { type: "string" },
+    guardrail: { type: "string" },
+    questions: { type: "array", items: { type: "string" }, minItems: 3, maxItems: 3 },
+  },
+  required: ["summary", "context", "originalLanguage", "theology", "sermonBridge", "application", "guardrail", "questions"],
+  additionalProperties: false,
+} as const;
 
 function buildPrompt(input: InsightRequest): string {
   const original = input.originalWords?.map((word) => ({
@@ -171,7 +188,7 @@ async function generateInsight(request: Request, env: Env): Promise<Response> {
         },
         { role: "user", content: buildPrompt(input) },
       ],
-      response_format: { type: "json_object" },
+      response_format: { type: "json_schema", json_schema: INSIGHT_SCHEMA },
       max_tokens: 1_350,
       temperature: 0.35,
       repetition_penalty: 1.08,
