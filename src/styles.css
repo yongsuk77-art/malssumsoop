@@ -151,21 +151,28 @@ button:disabled { cursor: default; opacity: .58; }
 .original-scroll { padding: 18px; }
 .original-text { min-height: 76px; display: flex; align-items: center; justify-content: center; padding: 15px; border-radius: 14px; background: linear-gradient(145deg, var(--gold-soft), color-mix(in srgb, var(--surface-soft) 78%, var(--gold-soft))); color: var(--ink); font-family: "Noto Serif", serif; font-size: calc(23px * var(--font-scale)); line-height: 1.75; text-align: center; }
 .original-text.rtl { direction: rtl; font-size: calc(26px * var(--font-scale)); }
+.verse-pronunciation { margin-top: 8px; padding: 10px 12px; border: 1px solid color-mix(in srgb, var(--green) 18%, var(--line)); border-radius: 11px; background: color-mix(in srgb, var(--green-soft) 45%, var(--surface)); direction: ltr; }
+.verse-pronunciation span { color: var(--green-2); font-size: 8px; font-weight: 800; }
+.verse-pronunciation p { margin: 3px 0 0; color: var(--ink); font-size: calc(11px * var(--font-scale)); font-weight: 650; line-height: 1.65; word-break: keep-all; }
+.verse-pronunciation small { display: block; margin-top: 4px; color: var(--muted); font-size: 7.5px; line-height: 1.45; }
 .tap-guide { display: flex; align-items: center; gap: 6px; margin: 12px 2px 9px; color: var(--muted); font-size: 9.5px; }
 .word-grid { display: flex; flex-wrap: wrap; gap: 7px; direction: ltr; }
 .word-grid.rtl { direction: rtl; }
-.word-grid button { min-width: 72px; flex: 1 1 78px; display: grid; grid-template-columns: 1fr auto; grid-template-areas: "surface code" "gloss gloss"; align-items: center; gap: 2px 7px; padding: 9px 10px; background: var(--surface-strong); border: 1px solid var(--line); border-radius: 10px; text-align: left; direction: ltr; transition: border .15s ease, transform .15s ease, background .15s ease; }
+.word-grid button { min-width: 88px; flex: 1 1 96px; display: grid; grid-template-columns: 1fr auto; grid-template-areas: "surface code" "pronunciation pronunciation" "gloss gloss"; align-items: center; gap: 2px 7px; padding: 9px 10px; background: var(--surface-strong); border: 1px solid var(--line); border-radius: 10px; text-align: left; direction: ltr; transition: border .15s ease, transform .15s ease, background .15s ease; }
 .word-grid.rtl button { text-align: right; }
 .word-grid button:hover { border-color: color-mix(in srgb, var(--gold) 55%, var(--line)); transform: translateY(-1px); }
 .word-grid button.active { background: var(--green-soft); border-color: color-mix(in srgb, var(--green) 45%, var(--line)); }
 .word-grid .surface { grid-area: surface; font-family: "Noto Serif", serif; font-size: calc(17px * var(--font-scale)); direction: rtl; }
 .word-grid .strong { grid-area: code; color: var(--green-2); font-size: 8px; font-weight: 800; direction: ltr; }
+.word-grid .pronunciation { grid-area: pronunciation; overflow: hidden; color: var(--green); font-size: 9.5px; font-weight: 750; white-space: nowrap; text-overflow: ellipsis; direction: ltr; }
 .word-grid small { grid-area: gloss; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; color: var(--muted); font-size: 8px; direction: ltr; }
 
 .word-inspector { margin-top: 15px; padding: 16px; border-radius: 15px; background: var(--surface-strong); border: 1px solid var(--line); box-shadow: 0 7px 22px rgba(30, 55, 45, .05); }
 .inspector-head { display: flex; justify-content: space-between; align-items: start; gap: 12px; }
 .inspector-head > div { display: flex; flex-direction: column; }
 .inspector-word { font-family: "Noto Serif", serif; font-size: 27px; line-height: 1.3; }
+.inspector-pronunciation { display: flex; align-items: center; gap: 6px; margin-top: 3px; color: var(--green); font-size: 12px; font-weight: 700; }
+.inspector-pronunciation b { color: var(--muted); font-size: 8px; }
 .inspector-lemma { margin-top: 2px; color: var(--muted); font-family: "Noto Serif", serif; font-size: 12px; }
 .strong-pill { padding: 5px 8px; border-radius: 7px; color: var(--green); background: var(--green-soft); font-size: 10px; font-weight: 800; }
 .morph-box { margin-top: 13px; display: grid; grid-template-columns: auto 1fr; gap: 4px 10px; padding: 11px; border-radius: 10px; background: var(--gold-soft); }

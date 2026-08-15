@@ -12,6 +12,7 @@ import {
 import { cachedInsight, generateInsight } from "./lib/insights";
 import { explainMorphology } from "./lib/morphology";
 import { loadMorphVerse, loadWebChapter } from "./lib/openData";
+import { koreanPronunciation, type OriginalLanguage } from "./lib/pronunciation";
 import { formatReference, parseReference, type Reference } from "./lib/reference";
 import { listLibraries } from "./lib/storage";
 import { taggedSegments } from "./lib/text";
@@ -123,6 +124,8 @@ function App() {
   const strongLibrary = useMemo(() => libraries.find((library) => library.kind === "strong-bible"), [libraries]);
   const commentaryLibrary = useMemo(() => libraries.find((library) => library.kind === "commentary"), [libraries]);
   const primaryLibrary = selectedLibraries[0] || BUILTIN_WEB;
+  const originalLanguage: OriginalLanguage = book.testament === "old" ? "hebrew" : "greek";
+  const versePronunciation = useMemo(() => morphVerse?.words.map((word) => koreanPronunciation(word.text, originalLanguage)).join(" · ") || "", [morphVerse, originalLanguage]);
 
   const notify = useCallback((message: string) => {
     setToast(message);
@@ -363,15 +366,16 @@ function App() {
           </div>
           <div className="original-scroll">
             <div className={`original-text ${book.testament === "old" ? "rtl" : ""}`}>{morphVerse?.text}</div>
+            {versePronunciation && <div className="verse-pronunciation"><span>한글 음가</span><p>{versePronunciation}</p><small>원문 읽기를 돕는 근사 음가이며, 학파와 시대에 따라 실제 발음은 달라질 수 있습니다.</small></div>}
             <p className="tap-guide"><Icon name="language" size={16}/> 단어를 누르면 형태와 사전 뜻을 함께 봅니다.</p>
             <div className={`word-grid ${book.testament === "old" ? "rtl" : ""}`}>
               {morphVerse?.words.map((word, index) => <button key={`${word.text}-${index}`} className={selectedWord === word ? "active" : ""} onClick={() => void chooseWord(word)}>
-                <span className="surface">{word.text}</span><span className="strong">{word.strong || "—"}</span><small>{word.gloss || word.lemma.replace(/^[a-z]+\//i, "")}</small>
+                <span className="surface">{word.text}</span><span className="strong">{word.strong || "—"}</span><span className="pronunciation">{koreanPronunciation(word.text, originalLanguage)}</span><small>{word.gloss || word.lemma.replace(/^[a-z]+\//i, "")}</small>
               </button>)}
             </div>
 
             {selectedWord ? <div className="word-inspector">
-              <div className="inspector-head"><div><span className="inspector-word">{selectedWord.text}</span><span className="inspector-lemma">{selectedWord.lemma}</span></div><span className="strong-pill">{selectedWord.strong}</span></div>
+              <div className="inspector-head"><div><span className="inspector-word">{selectedWord.text}</span><span className="inspector-pronunciation"><b>한글 음가</b>{koreanPronunciation(selectedWord.text, originalLanguage)}</span><span className="inspector-lemma">{selectedWord.lemma}</span></div><span className="strong-pill">{selectedWord.strong}</span></div>
               <div className="morph-box"><span>형태 분석</span><strong>{explainMorphology(selectedWord.morphology)}</strong><code>{selectedWord.morphology}</code></div>
               {selectedWord.gloss && <div className="gloss-row"><span>기본 의미</span><p>{selectedWord.gloss}</p></div>}
               {lexiconText ? <div className="lexicon-entry"><span>{lexiconLibrary?.name}</span><p>{lexiconText}</p></div> : <div className="lexicon-empty"><Icon name="library"/><p>{lexiconLibrary ? "이 코드의 사전 항목이 없습니다." : "HebGrkKo.dct를 가져오면 상세 한글 원어사전이 여기에 연결됩니다."}</p>{!lexiconLibrary && <button onClick={() => setModal("library")}>사전 가져오기</button>}</div>}
