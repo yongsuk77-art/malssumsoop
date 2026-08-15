@@ -7,7 +7,7 @@
     "dev": "vite",
     "build": "wrangler types && tsc -b && vite build",
     "check": "wrangler types && tsc -b --pretty false",
-    "test": "vitest run",
+    "test": "vitest run && node scripts/check_security_headers.mjs",
     "icons": "node scripts/render_icons.mjs",
     "deploy:dry": "npm run build && wrangler deploy --dry-run",
     "deploy": "npm run build && wrangler deploy",
