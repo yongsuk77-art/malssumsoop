@@ -310,8 +310,8 @@ function App() {
           <button onClick={() => setModal("hymns")} aria-label="찬송가"><Icon name="hymn"/><span>찬송가</span></button>
           <button onClick={() => setModal("library")} aria-label="내 서재"><Icon name="library"/><span>내 서재</span><i>{libraries.length}</i></button>
           <button onClick={install} aria-label="앱 설치"><Icon name="download"/><span>앱 설치</span></button>
-          <button onClick={() => setDark((value) => !value)} aria-label="화면 테마"><Icon name={dark ? "sun" : "moon"}/></button>
-          <button onClick={() => setModal("settings")} aria-label="설정"><Icon name="settings"/></button>
+          <button onClick={() => setDark((value) => !value)} aria-label={dark ? "화이트 모드로 전환" : "다크 모드로 전환"} title={dark ? "화이트 모드로 전환" : "다크 모드로 전환"}><Icon name={dark ? "sun" : "moon"}/><span>{dark ? "화이트" : "다크"}</span></button>
+          <button onClick={() => setModal("settings")} aria-label="읽기 설정"><Icon name="settings"/><span>읽기 설정</span></button>
         </nav>
       </header>
 
@@ -417,6 +417,7 @@ function App() {
         <button className={mobilePanel === "insight" ? "active" : ""} onClick={() => setMobilePanel("insight")}><Icon name="sparkle"/><span>통찰</span></button>
         <button onClick={() => setModal("hymns")}><Icon name="hymn"/><span>찬송가</span></button>
         <button onClick={() => setModal("library")}><Icon name="library"/><span>서재</span></button>
+        <button onClick={() => setModal("settings")}><Icon name="settings"/><span>읽기</span></button>
       </nav>
 
       {modal === "library" && (
@@ -513,7 +514,33 @@ function HymnModal({ libraries, onClose, onOpenLibrary }: { libraries: LibraryMe
 }
 
 function SettingsModal({ dark, setDark, fontScale, setFontScale, onInstall, onClose }: { dark: boolean; setDark: (value: boolean) => void; fontScale: number; setFontScale: (value: number) => void; onInstall: () => Promise<void>; onClose: () => void }) {
-  return <ModalShell title="읽기 설정" onClose={onClose}><div className="settings-list"><div><span><strong>화면 테마</strong><small>눈에 편한 밝기를 선택합니다.</small></span><div className="segmented"><button className={!dark ? "active" : ""} onClick={() => setDark(false)}><Icon name="sun" size={17}/> 밝게</button><button className={dark ? "active" : ""} onClick={() => setDark(true)}><Icon name="moon" size={17}/> 어둡게</button></div></div><div><span><strong>본문 글자 크기</strong><small>모든 연구 패널에 적용됩니다.</small></span><div className="font-control"><button onClick={() => setFontScale(Math.max(.85, fontScale - .05))}>가</button><input type="range" min="0.85" max="1.3" step="0.05" value={fontScale} onChange={(event) => setFontScale(Number(event.target.value))}/><button onClick={() => setFontScale(Math.min(1.3, fontScale + .05))}>가</button></div></div><div><span><strong>휴대폰에 설치</strong><small>전체 화면과 오프라인 앱 셸을 사용합니다.</small></span><button className="soft-button" onClick={() => void onInstall()}><Icon name="download" size={17}/> 홈 화면에 추가</button></div></div><div className="about-box"><span className="brand-mark"><Icon name="book"/></span><div><strong>말씀숲 0.1</strong><p>본문의 원래 뜻을 존중하며 설교자의 깊은 읽기를 돕습니다.</p></div></div></ModalShell>;
+  const changeFontScale = (delta: number) => setFontScale(Number(Math.min(1.3, Math.max(.85, fontScale + delta)).toFixed(2)));
+  const fontPercent = Math.round(fontScale * 100);
+
+  return <ModalShell title="읽기 설정" subtitle="화면 밝기와 본문 글자 크기를 조절합니다." onClose={onClose}>
+    <div className="settings-list">
+      <div>
+        <span><strong>화면 테마</strong><small>선택한 모드는 이 기기에 저장됩니다.</small></span>
+        <div className="segmented" role="group" aria-label="화면 테마 선택">
+          <button className={!dark ? "active" : ""} aria-pressed={!dark} onClick={() => setDark(false)}><Icon name="sun" size={17}/> 화이트 모드</button>
+          <button className={dark ? "active" : ""} aria-pressed={dark} onClick={() => setDark(true)}><Icon name="moon" size={17}/> 다크 모드</button>
+        </div>
+      </div>
+      <div>
+        <span><strong>본문 글자 크기</strong><small>본문·원문·통찰 패널에 함께 적용됩니다.</small></span>
+        <div className="font-settings">
+          <div className="font-control">
+            <button onClick={() => changeFontScale(-.05)} disabled={fontScale <= .85} aria-label="글자 크기 줄이기">가−</button>
+            <input aria-label="본문 글자 크기" type="range" min="0.85" max="1.3" step="0.05" value={fontScale} onChange={(event) => setFontScale(Number(event.target.value))}/>
+            <button onClick={() => changeFontScale(.05)} disabled={fontScale >= 1.3} aria-label="글자 크기 키우기">가+</button>
+          </div>
+          <div className="font-scale-status"><output aria-live="polite">{fontPercent}%</output><button onClick={() => setFontScale(1)} disabled={fontScale === 1}>기본 크기</button></div>
+        </div>
+      </div>
+      <div><span><strong>휴대폰에 설치</strong><small>전체 화면과 오프라인 앱 셸을 사용합니다.</small></span><button className="soft-button" onClick={() => void onInstall()}><Icon name="download" size={17}/> 홈 화면에 추가</button></div>
+    </div>
+    <div className="about-box"><span className="brand-mark"><Icon name="book"/></span><div><strong>말씀숲 0.1</strong><p>본문의 원래 뜻을 존중하며 설교자의 깊은 읽기를 돕습니다.</p></div></div>
+  </ModalShell>;
 }
 
 export default App;

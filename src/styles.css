@@ -301,10 +301,15 @@ button:disabled { cursor: default; opacity: .58; }
 .segmented { display: flex; padding: 3px; background: var(--surface-soft); border-radius: 9px; }
 .segmented button { display: flex; align-items: center; gap: 4px; padding: 7px 9px; border-radius: 7px; background: transparent; color: var(--muted); font-size: 9px; }
 .segmented button.active { background: var(--surface-strong); color: var(--green); box-shadow: 0 2px 7px rgba(0,0,0,.06); }
+.font-settings { min-width: 230px; display: grid; gap: 8px; }
 .font-control { display: flex; align-items: center; gap: 6px; }
-.font-control button { background: var(--surface-soft); border-radius: 7px; padding: 5px 8px; font-family: "Noto Serif", serif; }
-.font-control button:last-child { font-size: 16px; }
-.font-control input { width: 110px; accent-color: var(--green); }
+.font-control button { min-width: 42px; background: var(--surface-soft); border-radius: 7px; padding: 6px 8px; font-family: "Noto Serif", serif; font-weight: 750; }
+.font-control button:last-child { font-size: 14px; }
+.font-control input { flex: 1; min-width: 90px; accent-color: var(--green); }
+.font-scale-status { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.font-scale-status output { color: var(--green); font-size: 10px; font-weight: 800; }
+.font-scale-status button { padding: 4px 8px; border-radius: 7px; color: var(--muted); background: transparent; font-size: 9px; font-weight: 650; }
+.font-scale-status button:not(:disabled):hover { color: var(--green); background: var(--green-soft); }
 .about-box { margin: 0 20px 20px; display: flex; align-items: center; gap: 11px; padding: 12px; background: var(--surface-soft); border-radius: 12px; }
 .about-box .brand-mark { width: 36px; height: 36px; border-radius: 10px; }
 .about-box strong { font-size: 10px; }
@@ -330,7 +335,7 @@ button:disabled { cursor: default; opacity: .58; }
   .workspace { display: block; position: relative; flex: 1; min-height: 0; background: var(--surface); }
   .study-panel { display: none; position: absolute; inset: 0; }
   .mobile-scripture .scripture-panel, .mobile-original .original-panel, .mobile-insight .insight-panel { display: flex; }
-  .mobile-nav { height: calc(64px + env(safe-area-inset-bottom)); flex: none; display: grid; grid-template-columns: repeat(5, 1fr); padding: 5px 7px env(safe-area-inset-bottom); background: var(--surface-strong); border-top: 1px solid var(--line); position: relative; z-index: 25; }
+  .mobile-nav { height: calc(64px + env(safe-area-inset-bottom)); flex: none; display: grid; grid-template-columns: repeat(6, 1fr); padding: 5px 7px env(safe-area-inset-bottom); background: var(--surface-strong); border-top: 1px solid var(--line); position: relative; z-index: 25; }
   .mobile-nav button { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 3px; color: var(--muted); background: transparent; border-radius: 9px; }
   .mobile-nav button.active { color: var(--green); background: var(--green-soft); }
   .mobile-nav span { font-size: 9px; font-weight: 700; }
@@ -371,6 +376,8 @@ button:disabled { cursor: default; opacity: .58; }
   .hymn-browser > aside { height: 270px; border-right: 0; border-bottom: 1px solid var(--line); }
   .hymn-page { min-height: 420px; padding: 28px 24px; }
   .settings-list > div { align-items: start; flex-direction: column; }
+  .segmented, .font-settings { width: 100%; }
+  .segmented button { flex: 1; justify-content: center; padding: 9px 7px; }
   .font-control { width: 100%; }
   .font-control input { flex: 1; }
 }
