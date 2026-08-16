@@ -296,6 +296,9 @@ function App() {
           <select value={reference.chapter} onChange={(event) => selectReference({ ...reference, chapter: Number(event.target.value), verse: 1 })} aria-label="장">
             {Array.from({ length: book.chapters }, (_, index) => <option key={index + 1} value={index + 1}>{index + 1}장</option>)}
           </select>
+          <select value={reference.verse} onChange={(event) => selectReference({ ...reference, verse: Number(event.target.value) })} aria-label="절" disabled={!verseNumbers.length}>
+            {verseNumbers.map((verse) => <option key={verse} value={verse}>{verse}절</option>)}
+          </select>
           <form className="reference-form" onSubmit={submitReference}>
             <input value={referenceInput} onChange={(event) => setReferenceInput(event.target.value)} aria-label="성경 구절 직접 입력" placeholder="요 3:16"/>
           </form>
@@ -320,8 +323,10 @@ function App() {
               <div className="translation-picker">
                 <button className="soft-button" onClick={() => setTranslationMenu((value) => !value)}>{selectedLibraries.map((library) => library.name).join(" · ")} <small>▾</small></button>
                 {translationMenu && <div className="translation-menu">
-                  <strong>대조할 역본</strong><small>최대 4개</small>
-                  {bibleLibraries.map((library) => <label key={library.id}><input type="checkbox" checked={selectedBibleIds.includes(library.id)} onChange={() => toggleBible(library.id)}/><span>{library.name}<small>{library.id === BUILTIN_WEB.id ? "내장 · 공개 도메인" : KIND_LABEL[library.kind]}</small></span></label>)}
+                  <div className="translation-menu-head"><strong>대조할 역본</strong><small>최대 4개</small></div>
+                  <div className="translation-menu-list" role="group" aria-label="대조할 역본 목록">
+                    {bibleLibraries.map((library) => <label key={library.id}><input type="checkbox" checked={selectedBibleIds.includes(library.id)} onChange={() => toggleBible(library.id)}/><span>{library.name}<small>{library.id === BUILTIN_WEB.id ? "내장 · 공개 도메인" : KIND_LABEL[library.kind]}</small></span></label>)}
+                  </div>
                   <button onClick={() => { setTranslationMenu(false); setModal("library"); }}><Icon name="upload" size={17}/> 역본 더 가져오기</button>
                 </div>}
               </div>
