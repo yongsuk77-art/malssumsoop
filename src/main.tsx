@@ -12,7 +12,23 @@ createRoot(document.getElementById("root")!).render(
 );
 
 if ("serviceWorker" in navigator && import.meta.env.PROD) {
-  window.addEventListener("load", () => {
-    void navigator.serviceWorker.register("/sw.js");
+  window.addEventListener("load", async () => {
+    const hadController = Boolean(navigator.serviceWorker.controller);
+    let reloading = false;
+
+    navigator.serviceWorker.addEventListener("controllerchange", () => {
+      if (!hadController || reloading) return;
+      reloading = true;
+      window.location.reload();
+    });
+
+    try {
+      const registration = await navigator.serviceWorker.register("/sw.js", {
+        updateViaCache: "none",
+      });
+      await registration.update();
+    } catch (error) {
+      console.warn("서비스워커를 갱신하지 못했습니다.", error);
+    }
   });
 }

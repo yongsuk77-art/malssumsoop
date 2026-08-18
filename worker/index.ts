@@ -221,6 +221,20 @@ export default {
       return generateInsight(request, env);
     }
     if (url.pathname.startsWith("/api/")) return json({ error: "찾을 수 없는 API입니다." }, 404);
-    return env.ASSETS.fetch(request);
+    const response = await env.ASSETS.fetch(request);
+    const isDocumentRequest = request.headers.get("sec-fetch-dest") === "document"
+      || request.headers.get("accept")?.includes("text/html");
+    if (url.pathname === "/sw.js" || isDocumentRequest || url.pathname === "/") {
+      const headers = new Headers(response.headers);
+      headers.set("cache-control", "no-cache, no-store, must-revalidate");
+      headers.set("pragma", "no-cache");
+      headers.set("expires", "0");
+      return new Response(response.body, {
+        status: response.status,
+        statusText: response.statusText,
+        headers,
+      });
+    }
+    return response;
   },
 } satisfies ExportedHandler<Env>;
