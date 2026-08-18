@@ -64,3 +64,28 @@ export type InsightCache = {
   insight: Insight;
   generatedAt: string;
 };
+
+export type SermonNote = {
+  id: string;
+  book: number;
+  chapter: number;
+  verse: number;
+  reference: string;
+  translation: string;
+  verseText: string;
+  title: string;
+  meditation: string;
+  application: string;
+  outline: string;
+  prayer: string;
+  tags: string[];
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type SermonNotesBackup = {
+  kind: "malssumsoop-sermon-notes";
+  version: 1;
+  exportedAt: string;
+  notes: SermonNote[];
+};

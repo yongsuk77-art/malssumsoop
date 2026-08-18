@@ -10,16 +10,19 @@ import {
   searchBible,
 } from "./lib/bethlehem";
 import { cachedInsight, generateInsight } from "./lib/insights";
+import { googleDriveConfigured, prepareGoogleDrive, syncSermonNotesWithGoogleDrive } from "./lib/googleDrive";
 import { explainMorphology } from "./lib/morphology";
+import { hasSermonNoteContent, mergeSermonNotes, parseNotesBackup, serializeNotesBackup, sermonNoteId } from "./lib/notes";
 import { loadMorphVerse, loadWebChapter } from "./lib/openData";
 import { koreanPronunciation, type OriginalLanguage } from "./lib/pronunciation";
 import { formatReference, parseReference, type Reference } from "./lib/reference";
-import { listLibraries } from "./lib/storage";
+import { getSermonNote, listLibraries, listSermonNotes, removeSermonNote, saveSermonNote, saveSermonNotes } from "./lib/storage";
 import { taggedSegments } from "./lib/text";
-import type { BibleVerse, Hymn, Insight, LibraryMeta, MorphVerse, MorphWord, SearchResult } from "./types";
+import { downloadBlob, sermonNotesWordBlob } from "./lib/wordExport";
+import type { BibleVerse, Hymn, Insight, LibraryMeta, MorphVerse, MorphWord, SearchResult, SermonNote } from "./types";
 
 type Panel = "scripture" | "original" | "insight";
-type Modal = "library" | "search" | "hymns" | "settings" | null;
+type Modal = "library" | "search" | "hymns" | "notes" | "settings" | null;
 type BeforeInstallPromptEvent = Event & {
   prompt: () => Promise<void>;
   userChoice: Promise<{ outcome: "accepted" | "dismissed" }>;
@@ -54,7 +57,7 @@ const INSIGHT_SECTIONS: { key: keyof Omit<Insight, "questions">; icon: IconName;
   { key: "guardrail", icon: "shield", title: "해석의 가드레일" },
 ];
 
-type IconName = "book" | "search" | "library" | "hymn" | "settings" | "chevronLeft" | "chevronRight" | "download" | "moon" | "sun" | "upload" | "trash" | "close" | "sparkle" | "copy" | "focus" | "context" | "language" | "cross" | "bridge" | "steps" | "shield" | "check";
+type IconName = "book" | "search" | "library" | "hymn" | "notes" | "cloud" | "file" | "settings" | "chevronLeft" | "chevronRight" | "download" | "moon" | "sun" | "upload" | "trash" | "close" | "sparkle" | "copy" | "focus" | "context" | "language" | "cross" | "bridge" | "steps" | "shield" | "check";
 
 function referenceFromHash(): Reference {
   const match = window.location.hash.match(/^#([a-z0-9]+)-(\d+)-(\d+)$/i);
@@ -73,6 +76,9 @@ function Icon({ name, size = 20 }: { name: IconName; size?: number }) {
     search: <><circle cx="11" cy="11" r="7"/><path d="m20 20-4-4"/></>,
     library: <><path d="M4 4h5v16H4zM10.5 4H16v16h-5.5z"/><path d="m17.5 5.5 3-1 3.5 14-3 1z"/></>,
     hymn: <><path d="M9 18V5l10-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="16" cy="16" r="3"/></>,
+    notes: <><path d="M5 3h14v18H5z"/><path d="M8 7h8M8 11h8M8 15h5"/></>,
+    cloud: <path d="M7 18h10a4 4 0 0 0 .7-7.94A6 6 0 0 0 6.2 8.2 4.5 4.5 0 0 0 7 18Z"/>,
+    file: <><path d="M6 3h8l4 4v14H6z"/><path d="M14 3v5h5M9 13h6m-6 4h6"/></>,
     settings: <><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .34 1.87l.06.06-2.83 2.83-.06-.06a1.7 1.7 0 0 0-1.87-.34 1.7 1.7 0 0 0-1.04 1.56V21h-4v-.08A1.7 1.7 0 0 0 8.96 19.36a1.7 1.7 0 0 0-1.87.34l-.06.06-2.83-2.83.06-.06A1.7 1.7 0 0 0 4.6 15 1.7 1.7 0 0 0 3.04 14H3v-4h.04A1.7 1.7 0 0 0 4.6 9a1.7 1.7 0 0 0-.34-1.87L4.2 7.07l2.83-2.83.06.06A1.7 1.7 0 0 0 8.96 4 1.7 1.7 0 0 0 10 2.44V2h4v.44A1.7 1.7 0 0 0 15.04 4a1.7 1.7 0 0 0 1.87-.34l.06-.06 2.83 2.83-.06.06A1.7 1.7 0 0 0 19.4 9 1.7 1.7 0 0 0 20.96 10H21v4h-.04A1.7 1.7 0 0 0 19.4 15Z"/></>,
     chevronLeft: <path d="m15 18-6-6 6-6"/>, chevronRight: <path d="m9 18 6-6-6-6"/>,
     download: <><path d="M12 3v12m0 0 4-4m-4 4-4-4"/><path d="M5 20h14"/></>,
@@ -307,6 +313,7 @@ function App() {
 
         <nav className="header-actions" aria-label="도구">
           <button onClick={() => setModal("search")} aria-label="성경 검색"><Icon name="search"/><span>검색</span></button>
+          <button onClick={() => setModal("notes")} aria-label="설교 노트"><Icon name="notes"/><span>설교 노트</span></button>
           <button onClick={() => setModal("hymns")} aria-label="찬송가"><Icon name="hymn"/><span>찬송가</span></button>
           <button onClick={() => setModal("library")} aria-label="내 서재"><Icon name="library"/><span>내 서재</span><i>{libraries.length}</i></button>
           <button onClick={install} aria-label="앱 설치"><Icon name="download"/><span>앱 설치</span></button>
@@ -415,9 +422,9 @@ function App() {
         <button className={mobilePanel === "scripture" ? "active" : ""} onClick={() => setMobilePanel("scripture")}><Icon name="book"/><span>본문</span></button>
         <button className={mobilePanel === "original" ? "active" : ""} onClick={() => setMobilePanel("original")}><Icon name="language"/><span>원문분해</span></button>
         <button className={mobilePanel === "insight" ? "active" : ""} onClick={() => setMobilePanel("insight")}><Icon name="sparkle"/><span>통찰</span></button>
+        <button onClick={() => setModal("notes")}><Icon name="notes"/><span>노트</span></button>
         <button onClick={() => setModal("hymns")}><Icon name="hymn"/><span>찬송가</span></button>
         <button onClick={() => setModal("library")}><Icon name="library"/><span>서재</span></button>
-        <button onClick={() => setModal("settings")}><Icon name="settings"/><span>읽기</span></button>
       </nav>
 
       {modal === "library" && (
@@ -428,6 +435,17 @@ function App() {
       )}
       {modal === "hymns" && (
         <HymnModal libraries={libraries} onClose={() => setModal(null)} onOpenLibrary={() => setModal("library")}/>
+      )}
+      {modal === "notes" && (
+        <SermonNotesModal
+          reference={reference}
+          verseText={selectedVerseText}
+          translation={primaryLibrary.name}
+          insight={insight}
+          onSelect={selectReference}
+          onClose={() => setModal(null)}
+          notify={notify}
+        />
       )}
       {modal === "settings" && (
         <SettingsModal dark={dark} setDark={setDark} fontScale={fontScale} setFontScale={setFontScale} onInstall={install} onClose={() => setModal(null)}/>
@@ -510,6 +528,311 @@ function HymnModal({ libraries, onClose, onOpenLibrary }: { libraries: LibraryMe
   }, [query, selectedId]);
   return <ModalShell title="찬송가" subtitle="번호, 제목 또는 가사로 찾을 수 있습니다." onClose={onClose} wide>
     {hymnals.length ? <div className="hymn-browser"><aside><div className="hymn-filters"><select value={selectedId} onChange={(event) => { setSelectedId(event.target.value); setSelected(undefined); }}>{hymnals.map((library) => <option key={library.id} value={library.id}>{library.name}</option>)}</select><div><Icon name="search" size={17}/><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="제목이나 가사 검색"/></div></div><div className="hymn-list">{hymns.map((hymn) => <button key={hymn.number} className={selected?.number === hymn.number ? "active" : ""} onClick={() => setSelected(hymn)}><span>{hymn.number}</span><strong>{hymn.title}</strong></button>)}</div></aside><article className="hymn-page">{selected ? <><span className="hymn-number">찬송 {selected.number}장</span><h3>{selected.title}</h3><div className="hymn-rule"/><p>{selected.text}</p></> : <div className="empty-list">찬송가를 선택하세요.</div>}</article></div> : <div className="modal-empty"><span className="large-round"><Icon name="hymn" size={34}/></span><h3>찬송가 가사 파일을 연결하세요</h3><p>`새찬송가.hdb` 또는 `찬미가.hdb`를 가져오면<br/>번호·제목·가사 검색을 사용할 수 있습니다.</p><button className="primary-button" onClick={onOpenLibrary}><Icon name="upload"/> 찬송가 가져오기</button></div>}
+  </ModalShell>;
+}
+
+type SermonNoteDraft = {
+  title: string;
+  meditation: string;
+  application: string;
+  outline: string;
+  prayer: string;
+  tagsText: string;
+};
+
+const EMPTY_NOTE_DRAFT: SermonNoteDraft = { title: "", meditation: "", application: "", outline: "", prayer: "", tagsText: "" };
+
+function draftFromNote(note?: SermonNote): SermonNoteDraft {
+  return note ? {
+    title: note.title,
+    meditation: note.meditation,
+    application: note.application,
+    outline: note.outline,
+    prayer: note.prayer,
+    tagsText: note.tags.join(", "),
+  } : { ...EMPTY_NOTE_DRAFT };
+}
+
+function SermonNotesModal({ reference, verseText, translation, insight, onSelect, onClose, notify }: {
+  reference: Reference;
+  verseText: string;
+  translation: string;
+  insight?: Insight;
+  onSelect: (reference: Reference) => void;
+  onClose: () => void;
+  notify: (message: string) => void;
+}) {
+  const currentId = sermonNoteId(reference);
+  const [draft, setDraft] = useState<SermonNoteDraft>(EMPTY_NOTE_DRAFT);
+  const [notes, setNotes] = useState<SermonNote[]>([]);
+  const [loadedId, setLoadedId] = useState("");
+  const [saveStatus, setSaveStatus] = useState("불러오는 중…");
+  const [dirty, setDirty] = useState(false);
+  const [query, setQuery] = useState("");
+  const [busy, setBusy] = useState("");
+  const [driveReady, setDriveReady] = useState(false);
+  const createdAtRef = useRef(new Date().toISOString());
+  const importRef = useRef<HTMLInputElement>(null);
+
+  const buildCurrentNote = useCallback((updatedAt = new Date().toISOString()): SermonNote => ({
+    id: currentId,
+    book: reference.book,
+    chapter: reference.chapter,
+    verse: reference.verse,
+    reference: formatReference(reference),
+    translation,
+    verseText,
+    title: draft.title.trim(),
+    meditation: draft.meditation.trim(),
+    application: draft.application.trim(),
+    outline: draft.outline.trim(),
+    prayer: draft.prayer.trim(),
+    tags: [...new Set(draft.tagsText.split(/[,#\n]/).map((tag) => tag.trim()).filter(Boolean))].slice(0, 20),
+    createdAt: createdAtRef.current,
+    updatedAt,
+  }), [currentId, draft, reference, translation, verseText]);
+
+  const replaceCurrentDraft = useCallback((note?: SermonNote) => {
+    createdAtRef.current = note?.createdAt || new Date().toISOString();
+    setDraft(draftFromNote(note));
+    setDirty(false);
+    setLoadedId(currentId);
+    setSaveStatus(note ? "저장됨" : "내용을 입력하면 자동 저장됩니다");
+  }, [currentId]);
+
+  useEffect(() => {
+    let cancelled = false;
+    setLoadedId("");
+    setSaveStatus("불러오는 중…");
+    void Promise.all([getSermonNote(currentId), listSermonNotes()]).then(([note, stored]) => {
+      if (cancelled) return;
+      setNotes(stored);
+      replaceCurrentDraft(note);
+    }).catch(() => {
+      if (!cancelled) setSaveStatus("저장소를 열지 못했습니다");
+    });
+    return () => { cancelled = true; };
+  }, [currentId, replaceCurrentDraft]);
+
+  useEffect(() => {
+    if (!googleDriveConfigured()) return;
+    void prepareGoogleDrive().then(() => setDriveReady(true)).catch(() => setDriveReady(false));
+  }, []);
+
+  useEffect(() => {
+    if (loadedId !== currentId || !dirty) return;
+    const candidate = buildCurrentNote();
+    if (!hasSermonNoteContent(candidate)) {
+      setSaveStatus("내용을 입력하면 자동 저장됩니다");
+      return;
+    }
+    setSaveStatus("변경됨 · 잠시 후 자동 저장");
+    const timer = window.setTimeout(() => {
+      const note = buildCurrentNote();
+      setSaveStatus("자동 저장 중…");
+      void saveSermonNote(note).then(() => {
+        setNotes((current) => [note, ...current.filter((item) => item.id !== note.id)].sort((a, b) => Date.parse(b.updatedAt) - Date.parse(a.updatedAt)));
+        setDirty(false);
+        setSaveStatus("저장됨");
+      }).catch(() => setSaveStatus("저장 실패 · 다시 입력해 주세요"));
+    }, 650);
+    return () => window.clearTimeout(timer);
+  }, [buildCurrentNote, currentId, dirty, loadedId]);
+
+  const setField = (field: keyof SermonNoteDraft, value: string) => {
+    setDirty(true);
+    setDraft((current) => ({ ...current, [field]: value }));
+  };
+
+  const persistCurrent = async (): Promise<void> => {
+    if (!dirty) return;
+    const current = buildCurrentNote();
+    if (hasSermonNoteContent(current)) {
+      await saveSermonNote(current);
+      setNotes((stored) => [current, ...stored.filter((note) => note.id !== current.id)].sort((a, b) => Date.parse(b.updatedAt) - Date.parse(a.updatedAt)));
+      setDirty(false);
+      setSaveStatus("저장됨");
+    }
+  };
+
+  const closeNotes = async () => {
+    try { await persistCurrent(); }
+    catch { notify("마지막 내용을 저장하지 못했습니다. 노트를 다시 열어 확인해 주세요."); }
+    onClose();
+  };
+
+  const selectSavedNote = async (note: SermonNote) => {
+    try { await persistCurrent(); }
+    catch { notify("현재 노트의 마지막 내용을 저장하지 못했습니다."); }
+    onSelect({ book: note.book, chapter: note.chapter, verse: note.verse });
+  };
+
+  const notesWithCurrent = async (): Promise<SermonNote[]> => {
+    const current = buildCurrentNote();
+    if (dirty && hasSermonNoteContent(current)) {
+      await saveSermonNote(current);
+      setDirty(false);
+      setSaveStatus("저장됨");
+    }
+    const stored = await listSermonNotes();
+    setNotes(stored);
+    return stored;
+  };
+
+  const exportBackup = async (share = false) => {
+    setBusy("backup");
+    try {
+      const stored = await notesWithCurrent();
+      if (!stored.length) return notify("먼저 설교 노트를 작성해 주세요.");
+      const fileName = `말씀숲-설교노트-${new Date().toISOString().slice(0, 10)}.json`;
+      const file = new File([serializeNotesBackup(stored)], fileName, { type: "application/json" });
+      if (share && navigator.share && (!navigator.canShare || navigator.canShare({ files: [file] }))) {
+        await navigator.share({ title: "말씀숲 설교 노트 백업", text: "Google Drive에 저장해 다른 기기에서 다시 가져올 수 있습니다.", files: [file] });
+      } else {
+        downloadBlob(file, fileName);
+        notify(share ? "백업 파일을 받았습니다. Google Drive에 올려 보관하세요." : "설교 노트 백업 파일을 저장했습니다.");
+      }
+    } catch (error) {
+      if (error instanceof DOMException && error.name === "AbortError") return;
+      notify(error instanceof Error ? error.message : "백업 파일을 만들지 못했습니다.");
+    } finally {
+      setBusy("");
+    }
+  };
+
+  const importBackup = async (event: ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    event.target.value = "";
+    if (!file) return;
+    setBusy("import");
+    try {
+      const incoming = parseNotesBackup(await file.text());
+      const local = await listSermonNotes();
+      const merged = mergeSermonNotes(local, incoming.notes);
+      await saveSermonNotes(merged.notes);
+      setNotes(merged.notes);
+      replaceCurrentDraft(merged.notes.find((note) => note.id === currentId));
+      notify(`가져오기 완료: 새 노트 ${merged.added}개, 최신 내용 ${merged.updated}개 반영`);
+    } catch (error) {
+      notify(error instanceof Error ? error.message : "노트 백업을 가져오지 못했습니다.");
+    } finally {
+      setBusy("");
+    }
+  };
+
+  const exportWord = async (all: boolean) => {
+    setBusy(all ? "word-all" : "word-current");
+    try {
+      const current = dirty ? buildCurrentNote() : notes.find((note) => note.id === currentId) || buildCurrentNote();
+      const selected = all ? await notesWithCurrent() : (hasSermonNoteContent(current) ? [current] : []);
+      if (!selected.length) return notify("Word 문서로 만들 노트가 없습니다.");
+      if (!all && dirty) {
+        await saveSermonNote(current);
+        setDirty(false);
+        setSaveStatus("저장됨");
+      }
+      const blob = await sermonNotesWordBlob(selected);
+      const name = all ? `말씀숲-설교노트-${new Date().toISOString().slice(0, 10)}.docx` : `${current.reference}-${current.title || "설교노트"}.docx`;
+      downloadBlob(blob, name);
+      notify(all ? "전체 설교 노트를 Word 문서로 정리했습니다." : "선택 절의 노트를 Word 문서로 만들었습니다.");
+    } catch (error) {
+      notify(error instanceof Error ? error.message : "Word 문서를 만들지 못했습니다.");
+    } finally {
+      setBusy("");
+    }
+  };
+
+  const syncGoogleDrive = async () => {
+    setBusy("google");
+    try {
+      const current = dirty ? buildCurrentNote() : notes.find((note) => note.id === currentId) || buildCurrentNote();
+      const local = hasSermonNoteContent(current)
+        ? [current, ...notes.filter((note) => note.id !== current.id)]
+        : notes;
+      const merged = await syncSermonNotesWithGoogleDrive(local);
+      await saveSermonNotes(merged.notes);
+      setNotes(merged.notes);
+      replaceCurrentDraft(merged.notes.find((note) => note.id === currentId));
+      notify(`Google Drive 동기화 완료: 가져온 새 노트 ${merged.added}개, 최신 내용 ${merged.updated}개`);
+    } catch (error) {
+      notify(error instanceof Error ? error.message : "Google Drive와 동기화하지 못했습니다.");
+    } finally {
+      setBusy("");
+    }
+  };
+
+  const removeCurrent = async () => {
+    const stored = notes.find((note) => note.id === currentId);
+    if (!stored || !window.confirm(`‘${stored.reference}’ 설교 노트를 이 기기에서 삭제할까요?`)) return;
+    await removeSermonNote(currentId);
+    setNotes((current) => current.filter((note) => note.id !== currentId));
+    replaceCurrentDraft(undefined);
+    notify("선택 절의 설교 노트를 삭제했습니다.");
+  };
+
+  const useInsightDraft = () => {
+    if (!insight) return notify("먼저 이 절의 영적 통찰을 생성해 주세요.");
+    setDirty(true);
+    setDraft((current) => ({
+      ...current,
+      meditation: [current.meditation, `[통찰 참고 초안]\n${insight.summary}\n\n${insight.theology}`].filter(Boolean).join("\n\n"),
+      application: [current.application, `[통찰 참고 초안]\n${insight.application}`].filter(Boolean).join("\n\n"),
+      outline: [current.outline, `[통찰 참고 초안]\n${insight.sermonBridge}\n\n해석의 주의점: ${insight.guardrail}`].filter(Boolean).join("\n\n"),
+    }));
+    notify("AI 통찰을 참고 초안으로 넣었습니다. 본문에 따라 직접 다듬어 주세요.");
+  };
+
+  const normalizedQuery = query.trim().toLocaleLowerCase("ko-KR");
+  const filteredNotes = notes.filter((note) => !normalizedQuery || [note.reference, note.title, note.meditation, ...note.tags].join(" ").toLocaleLowerCase("ko-KR").includes(normalizedQuery));
+
+  return <ModalShell title="설교 노트" subtitle="선택한 절마다 묵상·적용·설교 개요를 기록하고 다른 기기로 옮길 수 있습니다." onClose={() => void closeNotes()} wide>
+    <div className="notes-browser">
+      <aside className="notes-sidebar">
+        <div className="notes-search"><Icon name="search" size={17}/><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="구절, 제목, 태그 검색"/></div>
+        <div className="notes-list-head"><strong>저장된 노트</strong><span>{notes.length}개</span></div>
+        <div className="notes-list">
+          {filteredNotes.map((note) => <button key={note.id} className={note.id === currentId ? "active" : ""} onClick={() => void selectSavedNote(note)}>
+            <span>{note.reference}</span><strong>{note.title || "제목 없는 묵상"}</strong><small>{note.tags.slice(0, 3).map((tag) => `#${tag}`).join(" ") || new Date(note.updatedAt).toLocaleDateString("ko-KR")}</small>
+          </button>)}
+          {!filteredNotes.length && <div className="empty-list">{notes.length ? "검색 결과가 없습니다." : "아직 저장된 노트가 없습니다."}</div>}
+        </div>
+      </aside>
+
+      <section className="note-editor">
+        <div className="note-reference">
+          <div><span>{formatReference(reference)} · {translation}</span><p>{verseText || "선택한 역본에서 이 절의 본문을 불러오는 중입니다."}</p></div>
+          <span className={`save-status ${saveStatus === "저장됨" ? "saved" : ""}`}>{saveStatus}</span>
+        </div>
+        <div className="note-fields">
+          <label className="note-title"><span>노트 제목</span><input value={draft.title} onChange={(event) => setField("title", event.target.value)} placeholder="예: 은혜 안에서 걷는 사람"/></label>
+          <div className="note-field-grid">
+            <label><span>개인 묵상</span><textarea value={draft.meditation} onChange={(event) => setField("meditation", event.target.value)} placeholder="본문에서 발견한 하나님의 성품, 마음에 머문 질문과 깨달음…"/></label>
+            <label><span>삶과 공동체의 적용</span><textarea value={draft.application} onChange={(event) => setField("application", event.target.value)} placeholder="오늘 순종할 일, 교회와 청중에게 연결할 구체적인 적용…"/></label>
+            <label><span>설교 메모와 개요</span><textarea value={draft.outline} onChange={(event) => setField("outline", event.target.value)} placeholder="핵심 문장, 대지, 예화, 연결 구절, 주의할 해석…"/></label>
+            <label><span>기도</span><textarea value={draft.prayer} onChange={(event) => setField("prayer", event.target.value)} placeholder="본문 앞에서 드리는 기도와 결단…"/></label>
+          </div>
+          <label className="note-tags"><span>태그</span><input value={draft.tagsText} onChange={(event) => setField("tagsText", event.target.value)} placeholder="은혜, 창세기, 어린이설교 (쉼표로 구분)"/></label>
+        </div>
+        <div className="note-editor-actions">
+          <button className="soft-button" onClick={useInsightDraft}><Icon name="sparkle" size={17}/> 통찰을 참고 초안으로</button>
+          {notes.some((note) => note.id === currentId) && <button className="soft-button danger-text" onClick={() => void removeCurrent()}><Icon name="trash" size={17}/> 노트 삭제</button>}
+        </div>
+      </section>
+    </div>
+
+    <div className="note-transfer-bar">
+      <div className="note-transfer-info"><Icon name="shield" size={19}/><span><strong>기본 저장은 이 기기 안에서만</strong><small>아래 동기화·내보내기 버튼을 누를 때만 노트가 파일 또는 Google Drive로 이동합니다.</small></span></div>
+      <div className="note-transfer-actions">
+        {googleDriveConfigured() && <button className="primary-button" disabled={Boolean(busy) || !driveReady} onClick={() => void syncGoogleDrive()}><Icon name="cloud" size={17}/>{busy === "google" ? "동기화 중…" : driveReady ? "Google Drive 동기화" : "Google 연결 준비 중…"}</button>}
+        <button className="soft-button" disabled={Boolean(busy)} onClick={() => void exportBackup(true)}><Icon name="cloud" size={17}/>{busy === "backup" ? "백업 중…" : "Drive용 백업"}</button>
+        <button className="soft-button" disabled={Boolean(busy)} onClick={() => importRef.current?.click()}><Icon name="upload" size={17}/>{busy === "import" ? "가져오는 중…" : "백업 가져오기"}</button>
+        <button className="soft-button" disabled={Boolean(busy)} onClick={() => void exportWord(false)}><Icon name="file" size={17}/>{busy === "word-current" ? "만드는 중…" : "이 절 Word"}</button>
+        <button className="soft-button" disabled={Boolean(busy)} onClick={() => void exportWord(true)}><Icon name="download" size={17}/>{busy === "word-all" ? "만드는 중…" : "전체 Word"}</button>
+        <button className="soft-button" disabled={Boolean(busy)} onClick={() => void exportBackup()}><Icon name="download" size={17}/> JSON 보관</button>
+      </div>
+      {!googleDriveConfigured() && <p className="google-fallback-note">현재는 <b>Drive용 백업</b>으로 Google Drive에 보관한 뒤, 다른 컴퓨터에서 <b>백업 가져오기</b>를 사용하세요. 원클릭 동기화는 Google OAuth 클라이언트 ID를 연결하면 자동으로 활성화됩니다.</p>}
+      <input ref={importRef} hidden type="file" accept=".json,application/json" onChange={(event) => void importBackup(event)}/>
+    </div>
   </ModalShell>;
 }
 
