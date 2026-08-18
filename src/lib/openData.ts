@@ -47,8 +47,11 @@ export async function searchBuiltinBible(libraryId: string, term: string, limit 
   if (!library) throw new Error("검색할 기본 성경 자료를 찾지 못했습니다.");
   const needle = term.toLocaleLowerCase();
   const results: SearchResult[] = [];
-  for (const book of BOOKS) {
-    const data = await loadBibleBook(libraryId, book.id);
+  const books = await Promise.all(BOOKS.map(async (book) => ({
+    book,
+    data: await loadBibleBook(libraryId, book.id),
+  })));
+  for (const { book, data } of books) {
     for (const [chapter, verses] of Object.entries(data.chapters)) {
       for (const [verse, rawText] of Object.entries(verses)) {
         const text = legacyHtmlToText(rawText);
