@@ -1,4 +1,6 @@
-import type { BibleVerse, MorphVerse, MorphWord } from "../types";
+import { BOOKS } from "../data/books";
+import { builtinBibleById } from "../data/builtins";
+import type { BibleVerse, MorphVerse, MorphWord, SearchResult } from "../types";
 import { legacyHtmlToText } from "./text";
 
 type CompactWord = [string, string, string, string, string];
@@ -23,14 +25,50 @@ async function loadJson<T>(path: string): Promise<T> {
   return response.json() as Promise<T>;
 }
 
-export async function loadWebChapter(bookId: string, chapter: number): Promise<BibleVerse[]> {
-  const dataPromise = bibleCache.get(bookId) ?? loadJson<BibleBookData>(`/data/bibles/web/${bookId}.json`);
-  bibleCache.set(bookId, dataPromise);
-  const data = await dataPromise;
+function loadBibleBook(libraryId: string, bookId: string): Promise<BibleBookData> {
+  const library = builtinBibleById(libraryId);
+  if (!library) return Promise.reject(new Error("기본 성경 자료를 찾지 못했습니다."));
+  const cacheKey = `${library.dataId}/${bookId}`;
+  const dataPromise = bibleCache.get(cacheKey) ?? loadJson<BibleBookData>(`/data/bibles/${library.dataId}/${bookId}.json`);
+  bibleCache.set(cacheKey, dataPromise);
+  return dataPromise;
+}
+
+export async function loadBuiltinChapter(libraryId: string, bookId: string, chapter: number): Promise<BibleVerse[]> {
+  const data = await loadBibleBook(libraryId, bookId);
   return Object.entries(data.chapters[String(chapter)] || {}).map(([verse, text]) => ({
     verse: Number(verse),
     text: legacyHtmlToText(text),
   }));
+}
+
+export async function searchBuiltinBible(libraryId: string, term: string, limit = 80): Promise<SearchResult[]> {
+  const library = builtinBibleById(libraryId);
+  if (!library) throw new Error("검색할 기본 성경 자료를 찾지 못했습니다.");
+  const needle = term.toLocaleLowerCase();
+  const results: SearchResult[] = [];
+  const books = await Promise.all(BOOKS.map(async (book) => ({
+    book,
+    data: await loadBibleBook(libraryId, book.id),
+  })));
+  for (const { book, data } of books) {
+    for (const [chapter, verses] of Object.entries(data.chapters)) {
+      for (const [verse, rawText] of Object.entries(verses)) {
+        const text = legacyHtmlToText(rawText);
+        if (!text.toLocaleLowerCase().includes(needle)) continue;
+        results.push({
+          book: book.number,
+          chapter: Number(chapter),
+          verse: Number(verse),
+          text,
+          libraryId,
+          libraryName: library.name,
+        });
+        if (results.length >= limit) return results;
+      }
+    }
+  }
+  return results;
 }
 
 export async function loadMorphVerse(bookId: string, chapter: number, verse: number): Promise<MorphVerse | undefined> {
