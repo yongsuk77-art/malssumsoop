@@ -5,12 +5,24 @@ import { getLibrary, removeLibrary as removeStoredLibrary, saveLibrary } from ".
 import { legacyHtmlToText, normalizeStrong, stripStrongTags } from "./text";
 
 const MAX_FILE_SIZE = 90 * 1024 * 1024;
+const FILE_READ_TIMEOUT = 45_000;
+const STORAGE_TIMEOUT = 60_000;
 const databaseCache = new Map<string, Database>();
 let sqlPromise: Promise<SqlJsStatic> | undefined;
 
 function sql(): Promise<SqlJsStatic> {
   sqlPromise ??= initSqlJs({ locateFile: () => sqlWasmUrl });
   return sqlPromise;
+}
+
+function within<T>(promise: Promise<T>, milliseconds: number, message: string): Promise<T> {
+  return new Promise((resolve, reject) => {
+    const timer = window.setTimeout(() => reject(new Error(message)), milliseconds);
+    promise.then(
+      (value) => { window.clearTimeout(timer); resolve(value); },
+      (error) => { window.clearTimeout(timer); reject(error); },
+    );
+  });
 }
 
 function extensionOf(fileName: string): string {
@@ -37,14 +49,16 @@ function detectKind(fileName: string, tables: Set<string>): LibraryKind {
   return "bible";
 }
 
-export async function importBethlehemFile(file: File): Promise<LibraryMeta> {
+export async function importBethlehemFile(file: File, onProgress?: (stage: string) => void): Promise<LibraryMeta> {
   const extension = extensionOf(file.name);
   if (!["bdb", "sdb", "cdb", "dct", "hdb"].includes(extension)) {
     throw new Error(`${file.name}: 지원하지 않는 확장자입니다.`);
   }
   if (file.size > MAX_FILE_SIZE) throw new Error(`${file.name}: 90MB보다 큰 파일은 가져올 수 없습니다.`);
-  const bytes = await file.arrayBuffer();
-  const SQL = await sql();
+  onProgress?.("파일 읽는 중");
+  const bytes = await within(file.arrayBuffer(), FILE_READ_TIMEOUT, `${file.name}: 파일을 읽는 시간이 너무 오래 걸립니다.`);
+  onProgress?.("데이터베이스 확인 중");
+  const SQL = await within(sql(), FILE_READ_TIMEOUT, "성경 자료 처리기를 시작하지 못했습니다. 페이지를 새로고침해 주세요.");
   let database: Database | undefined;
   try {
     database = new SQL.Database(new Uint8Array(bytes));
@@ -59,13 +73,17 @@ export async function importBethlehemFile(file: File): Promise<LibraryMeta> {
       importedAt: new Date().toISOString(),
       bytes,
     };
-    await saveLibrary(library);
+    onProgress?.("이 기기에 저장 중");
+    await within(saveLibrary(library), STORAGE_TIMEOUT, `${file.name}: 브라우저 저장이 완료되지 않았습니다.`);
     databaseCache.set(library.id, database);
     database = undefined;
     const { bytes: _bytes, ...meta } = library;
     return meta;
   } catch (error) {
     database?.close();
+    if (error instanceof DOMException && error.name === "QuotaExceededError") {
+      throw new Error(`${file.name}: 브라우저 저장 공간이 부족합니다. 사용하지 않는 자료를 지운 뒤 다시 시도해 주세요.`);
+    }
     throw error instanceof Error ? error : new Error(`${file.name}: 파일을 읽지 못했습니다.`);
   }
 }

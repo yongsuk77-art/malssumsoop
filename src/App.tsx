@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ChangeEvent, type FormEvent, type ReactNode } from "react";
 import { BOOKS, bookByNumber } from "./data/books";
+import { BUILTIN_BIBLES, BUILTIN_STUDY_RESOURCES, DEFAULT_BIBLE_IDS, isBuiltinBible } from "./data/builtins";
 import {
   deleteLibrary,
   importBethlehemFile,
@@ -13,7 +14,7 @@ import { cachedInsight, generateInsight } from "./lib/insights";
 import { googleDriveConfigured, prepareGoogleDrive, syncSermonNotesWithGoogleDrive } from "./lib/googleDrive";
 import { explainMorphology } from "./lib/morphology";
 import { hasSermonNoteContent, mergeSermonNotes, parseNotesBackup, serializeNotesBackup, sermonNoteId } from "./lib/notes";
-import { loadMorphVerse, loadWebChapter } from "./lib/openData";
+import { loadBuiltinChapter, loadMorphVerse, searchBuiltinBible } from "./lib/openData";
 import { koreanPronunciation, type OriginalLanguage } from "./lib/pronunciation";
 import { formatReference, parseReference, type Reference } from "./lib/reference";
 import { getSermonNote, listLibraries, listSermonNotes, removeSermonNote, saveSermonNote, saveSermonNotes } from "./lib/storage";
@@ -28,16 +29,6 @@ type BeforeInstallPromptEvent = Event & {
   userChoice: Promise<{ outcome: "accepted" | "dismissed" }>;
 };
 
-const BUILTIN_WEB: LibraryMeta = {
-  id: "builtin-web",
-  name: "WEB",
-  fileName: "World English Bible",
-  extension: "json",
-  kind: "bible",
-  size: 0,
-  importedAt: "",
-};
-
 const KIND_LABEL: Record<LibraryMeta["kind"], string> = {
   bible: "성경 역본",
   "strong-bible": "스트롱 역본",
@@ -46,6 +37,16 @@ const KIND_LABEL: Record<LibraryMeta["kind"], string> = {
   lexicon: "원어 사전",
   hymnal: "찬송가",
 };
+
+function initialBibleIds(): string[] {
+  try {
+    const stored = JSON.parse(localStorage.getItem("selectedBibleIds") || "null");
+    if (Array.isArray(stored) && stored.every((id) => typeof id === "string") && stored.length) return stored.slice(0, 4);
+  } catch {
+    // A corrupt preference should never prevent the default library from opening.
+  }
+  return [...DEFAULT_BIBLE_IDS];
+}
 
 const INSIGHT_SECTIONS: { key: keyof Omit<Insight, "questions">; icon: IconName; title: string }[] = [
   { key: "summary", icon: "focus", title: "한 문장 중심" },
@@ -105,7 +106,7 @@ function App() {
   const [reference, setReference] = useState<Reference>(referenceFromHash);
   const [referenceInput, setReferenceInput] = useState(() => formatReference(referenceFromHash()));
   const [libraries, setLibraries] = useState<LibraryMeta[]>([]);
-  const [selectedBibleIds, setSelectedBibleIds] = useState<string[]>([BUILTIN_WEB.id]);
+  const [selectedBibleIds, setSelectedBibleIds] = useState<string[]>(initialBibleIds);
   const [chapterMap, setChapterMap] = useState<Record<string, BibleVerse[]>>({});
   const [commentary, setCommentary] = useState<BibleVerse[]>([]);
   const [morphVerse, setMorphVerse] = useState<MorphVerse>();
@@ -124,12 +125,12 @@ function App() {
   const scriptureScrollRef = useRef<HTMLDivElement>(null);
 
   const book = bookByNumber(reference.book);
-  const bibleLibraries = useMemo(() => [BUILTIN_WEB, ...libraries.filter((library) => library.kind === "bible" || library.kind === "strong-bible")], [libraries]);
+  const bibleLibraries = useMemo(() => [...BUILTIN_BIBLES, ...libraries.filter((library) => library.kind === "bible" || library.kind === "strong-bible")], [libraries]);
   const selectedLibraries = useMemo(() => selectedBibleIds.flatMap((id) => bibleLibraries.find((library) => library.id === id) || []), [selectedBibleIds, bibleLibraries]);
   const lexiconLibrary = useMemo(() => libraries.find((library) => library.kind === "lexicon" && /Ko|한|국/i.test(library.name)) || libraries.find((library) => library.kind === "lexicon"), [libraries]);
   const strongLibrary = useMemo(() => libraries.find((library) => library.kind === "strong-bible"), [libraries]);
   const commentaryLibrary = useMemo(() => libraries.find((library) => library.kind === "commentary"), [libraries]);
-  const primaryLibrary = selectedLibraries[0] || BUILTIN_WEB;
+  const primaryLibrary = selectedLibraries[0] || BUILTIN_BIBLES[0];
   const originalLanguage: OriginalLanguage = book.testament === "old" ? "hebrew" : "greek";
   const versePronunciation = useMemo(() => morphVerse?.words.map((word) => koreanPronunciation(word.text, originalLanguage)).join(" · ") || "", [morphVerse, originalLanguage]);
 
@@ -142,9 +143,12 @@ function App() {
     const next = await listLibraries();
     setLibraries(next);
     setSelectedBibleIds((current) => {
-      const valid = current.filter((id) => id === BUILTIN_WEB.id || next.some((library) => library.id === id));
+      const valid = current.filter((id) => isBuiltinBible(id) || next.some((library) => library.id === id));
       const preferred = next.find((library) => library.kind === "bible" && /개역|우리말|새번역|쉬운/i.test(library.name));
-      return valid.length > 1 || !preferred ? valid : [preferred.id, BUILTIN_WEB.id];
+      if (preferred && !valid.includes(preferred.id) && valid.every(isBuiltinBible)) {
+        return [preferred.id, ...valid.slice(0, 3)];
+      }
+      return valid.length ? valid : [...DEFAULT_BIBLE_IDS];
     });
   }, []);
 
@@ -156,6 +160,10 @@ function App() {
     localStorage.setItem("theme", dark ? "dark" : "light");
     localStorage.setItem("fontScale", String(fontScale));
   }, [dark, fontScale]);
+
+  useEffect(() => {
+    localStorage.setItem("selectedBibleIds", JSON.stringify(selectedBibleIds));
+  }, [selectedBibleIds]);
 
   useEffect(() => {
     const handler = (event: Event) => {
@@ -170,10 +178,11 @@ function App() {
     let cancelled = false;
     void Promise.all(selectedLibraries.map(async (library) => [
       library.id,
-      library.id === BUILTIN_WEB.id ? await loadWebChapter(book.id, reference.chapter) : await queryChapter(library, reference.book, reference.chapter),
-    ] as const)).then((entries) => { if (!cancelled) setChapterMap(Object.fromEntries(entries)); });
+      isBuiltinBible(library.id) ? await loadBuiltinChapter(library.id, book.id, reference.chapter) : await queryChapter(library, reference.book, reference.chapter),
+    ] as const)).then((entries) => { if (!cancelled) setChapterMap(Object.fromEntries(entries)); })
+      .catch(() => { if (!cancelled) notify("성경 자료를 불러오지 못했습니다. 잠시 후 다시 시도해 주세요."); });
     return () => { cancelled = true; };
-  }, [selectedLibraries, book.id, reference.book, reference.chapter]);
+  }, [selectedLibraries, book.id, reference.book, reference.chapter, notify]);
 
   useEffect(() => {
     let cancelled = false;
@@ -315,7 +324,7 @@ function App() {
           <button onClick={() => setModal("search")} aria-label="성경 검색"><Icon name="search"/><span>검색</span></button>
           <button onClick={() => setModal("notes")} aria-label="설교 노트"><Icon name="notes"/><span>설교 노트</span></button>
           <button onClick={() => setModal("hymns")} aria-label="찬송가"><Icon name="hymn"/><span>찬송가</span></button>
-          <button onClick={() => setModal("library")} aria-label="내 서재"><Icon name="library"/><span>내 서재</span><i>{libraries.length}</i></button>
+          <button onClick={() => setModal("library")} aria-label="내 서재"><Icon name="library"/><span>내 서재</span><i>{BUILTIN_BIBLES.length + BUILTIN_STUDY_RESOURCES.length + libraries.length}</i></button>
           <button onClick={install} aria-label="앱 설치"><Icon name="download"/><span>앱 설치</span></button>
           <button onClick={() => setDark((value) => !value)} aria-label={dark ? "화이트 모드로 전환" : "다크 모드로 전환"} title={dark ? "화이트 모드로 전환" : "다크 모드로 전환"}><Icon name={dark ? "sun" : "moon"}/><span>{dark ? "화이트" : "다크"}</span></button>
           <button onClick={() => setModal("settings")} aria-label="읽기 설정"><Icon name="settings"/><span>읽기 설정</span></button>
@@ -332,7 +341,7 @@ function App() {
                 {translationMenu && <div className="translation-menu">
                   <div className="translation-menu-head"><strong>대조할 역본</strong><small>최대 4개</small></div>
                   <div className="translation-menu-list" role="group" aria-label="대조할 역본 목록">
-                    {bibleLibraries.map((library) => <label key={library.id}><input type="checkbox" checked={selectedBibleIds.includes(library.id)} onChange={() => toggleBible(library.id)}/><span>{library.name}<small>{library.id === BUILTIN_WEB.id ? "내장 · 공개 도메인" : KIND_LABEL[library.kind]}</small></span></label>)}
+                    {bibleLibraries.map((library) => <label key={library.id}><input type="checkbox" checked={selectedBibleIds.includes(library.id)} onChange={() => toggleBible(library.id)}/><span>{library.name}<small>{isBuiltinBible(library.id) ? "기본 제공 · 공개 자료" : KIND_LABEL[library.kind]}</small></span></label>)}
                   </div>
                   <button onClick={() => { setTranslationMenu(false); setModal("library"); }}><Icon name="upload" size={17}/> 역본 더 가져오기</button>
                 </div>}
@@ -344,8 +353,8 @@ function App() {
           <div className="scripture-scroll" ref={scriptureScrollRef}>
             {libraries.length === 0 && <div className="welcome-card">
               <span className="welcome-icon"><Icon name="library" size={28}/></span>
-              <div><strong>베들레헴 자료를 그대로 이어 쓰세요</strong><p>개역개정, 원어사전, 주석, 찬송가 파일을 가져오면 이 기기에만 안전하게 저장됩니다.</p></div>
-              <button onClick={() => setModal("library")}>자료 가져오기</button>
+              <div><strong>기본 성경과 원문 자료가 준비되어 있습니다</strong><p>한글 성경·WEB·YLT·ASV와 히브리어·헬라어 원문 분해를 바로 사용할 수 있습니다.</p></div>
+              <button onClick={() => setModal("library")}>기본 서재 보기</button>
             </div>}
             <div className="verse-list">
               {verseNumbers.map((verseNumber) => <article key={verseNumber} className={`verse-row ${reference.verse === verseNumber ? "selected" : ""}`} onClick={() => selectReference({ ...reference, verse: verseNumber })}>
@@ -431,7 +440,7 @@ function App() {
         <LibraryModal libraries={libraries} onClose={() => setModal(null)} onChanged={refreshLibraries} notify={notify}/>
       )}
       {modal === "search" && (
-        <SearchModal libraries={libraries} onClose={() => setModal(null)} onSelect={(next) => { selectReference(next); setModal(null); }} notify={notify}/>
+        <SearchModal libraries={[...bibleLibraries, ...libraries.filter((library) => library.kind === "commentary")]} onClose={() => setModal(null)} onSelect={(next) => { selectReference(next); setModal(null); }} notify={notify}/>
       )}
       {modal === "hymns" && (
         <HymnModal libraries={libraries} onClose={() => setModal(null)} onOpenLibrary={() => setModal("library")}/>
@@ -468,29 +477,41 @@ function LibraryModal({ libraries, onClose, onChanged, notify }: { libraries: Li
     if (!files.length) return;
     setBusy(true);
     let imported = 0;
-    for (const file of files) {
-      setProgress(`${file.name} 읽는 중…`);
-      try { await importBethlehemFile(file); imported += 1; }
-      catch (error) { notify(error instanceof Error ? error.message : `${file.name} 가져오기 실패`); }
+    try {
+      for (const file of files) {
+        setProgress(`${file.name} · 파일 읽는 중`);
+        try {
+          await importBethlehemFile(file, (stage) => setProgress(`${file.name} · ${stage}`));
+          imported += 1;
+        } catch (error) {
+          notify(error instanceof Error ? error.message : `${file.name} 가져오기 실패`);
+        }
+      }
+      await onChanged();
+      if (imported) notify(`${imported}개 자료를 내 서재에 추가했습니다.`);
+    } catch (error) {
+      notify(error instanceof Error ? error.message : "서재 목록을 새로 고치지 못했습니다.");
+    } finally {
+      setBusy(false);
+      setProgress("");
+      event.target.value = "";
     }
-    await onChanged();
-    setBusy(false);
-    setProgress("");
-    event.target.value = "";
-    if (imported) notify(`${imported}개 자료를 내 서재에 추가했습니다.`);
   };
   const remove = async (library: LibraryMeta) => {
     if (!window.confirm(`‘${library.name}’ 자료를 이 기기에서 삭제할까요? 원본 파일은 삭제되지 않습니다.`)) return;
     await deleteLibrary(library.id);
     await onChanged();
   };
-  return <ModalShell title="내 베들레헴 서재" subtitle="보유한 자료를 서버 전송 없이 이 기기에서 바로 읽습니다." onClose={onClose} wide>
-    <div className="privacy-banner"><Icon name="shield"/><div><strong>가져온 자료 파일은 이 기기 밖으로 업로드되지 않습니다</strong><p>브라우저의 개인 저장소에 보관되며 언제든 삭제할 수 있습니다. 통찰 생성을 요청할 때만 선택 절과 분석용 문맥이 Cloudflare AI로 전송됩니다.</p></div></div>
-    <button className="import-zone" onClick={() => fileRef.current?.click()} disabled={busy}><span><Icon name="upload" size={30}/></span><strong>{busy ? progress : "베들레헴 자료 선택"}</strong><small>.bdb · .sdb · .cdb · .dct · .hdb — 여러 파일 동시 선택 가능</small></button>
+  return <ModalShell title="내 베들레헴 서재" subtitle="기본 자료는 바로 사용하고, 보유한 자료만 이 기기에 추가합니다." onClose={onClose} wide>
+    <div className="privacy-banner"><Icon name="shield"/><div><strong>기본 자료는 서버에서 제공되고 개인 파일은 이 기기에만 저장됩니다</strong><p>개인 파일은 외부로 업로드되지 않으며 언제든 삭제할 수 있습니다. 통찰 생성 때만 선택 절과 분석용 문맥이 Cloudflare AI로 전송됩니다.</p></div></div>
+    <button className="import-zone" onClick={() => fileRef.current?.click()} disabled={busy}><span><Icon name="upload" size={30}/></span><strong>{busy ? progress : "내 베들레헴 자료 추가 (선택)"}</strong><small>.bdb · .sdb · .cdb · .dct · .hdb — 여러 파일 동시 선택 가능</small></button>
     <input ref={fileRef} hidden type="file" multiple accept=".bdb,.sdb,.cdb,.dct,.hdb" onChange={(event) => void importFiles(event)}/>
     <div className="library-list">
-      <div className="library-list-head"><strong>이 기기의 자료</strong><span>{libraries.length}개</span></div>
-      {libraries.length ? libraries.map((library) => <div className="library-item" key={library.id}><span className={`file-icon kind-${library.kind}`}><Icon name={library.kind === "hymnal" ? "hymn" : library.kind === "lexicon" ? "language" : "book"}/></span><div><strong>{library.name}</strong><small>{KIND_LABEL[library.kind]} · {(library.size / 1024 / 1024).toFixed(1)}MB</small></div><button className="icon-button subtle danger" onClick={() => void remove(library)} aria-label="삭제"><Icon name="trash" size={18}/></button></div>) : <div className="empty-list">아직 가져온 자료가 없습니다.</div>}
+      <div className="library-list-head"><strong>처음부터 제공되는 기본 자료</strong><span>{BUILTIN_BIBLES.length + BUILTIN_STUDY_RESOURCES.length}개</span></div>
+      {BUILTIN_BIBLES.map((library) => <div className="library-item" key={library.id}><span className="file-icon kind-bible"><Icon name="book"/></span><div><strong>{library.name}</strong><small>{library.description} · {library.license}</small></div><span className="default-badge">기본</span></div>)}
+      {BUILTIN_STUDY_RESOURCES.map((resource) => <div className="library-item" key={resource.id}><span className="file-icon kind-original"><Icon name="language"/></span><div><strong>{resource.name}</strong><small>{resource.description}</small></div><span className="default-badge">기본</span></div>)}
+      <div className="library-list-head secondary"><strong>내가 가져온 개인 자료</strong><span>{libraries.length}개</span></div>
+      {libraries.length ? libraries.map((library) => <div className="library-item" key={library.id}><span className={`file-icon kind-${library.kind}`}><Icon name={library.kind === "hymnal" ? "hymn" : library.kind === "lexicon" ? "language" : "book"}/></span><div><strong>{library.name}</strong><small>{KIND_LABEL[library.kind]} · {(library.size / 1024 / 1024).toFixed(1)}MB</small></div><button className="icon-button subtle danger" onClick={() => void remove(library)} aria-label="삭제"><Icon name="trash" size={18}/></button></div>) : <div className="empty-list">추가한 개인 자료가 없습니다. 기본 자료는 위에서 바로 사용할 수 있습니다.</div>}
     </div>
     <div className="format-guide"><strong>추천 가져오기 순서</strong><ol><li><span>1</span><div><b>01개역개정.bdb</b><small>주로 읽을 한글 본문</small></div></li><li><span>2</span><div><b>개역개정S.sdb</b><small>번역 어절과 스트롱 코드 연결</small></div></li><li><span>3</span><div><b>HebGrkKo.dct</b><small>한글 히브리어·헬라어 사전</small></div></li><li><span>4</span><div><b>새찬송가.hdb</b><small>찬송가 제목과 가사</small></div></li></ol></div>
   </ModalShell>;
@@ -507,10 +528,15 @@ function SearchModal({ libraries, onClose, onSelect, notify }: { libraries: Libr
     const library = searchable.find((item) => item.id === selectedId);
     if (!library || !term.trim()) return notify("검색할 역본과 단어를 선택해 주세요.");
     setBusy(true);
-    setResults(await searchBible(library, term.trim()));
-    setBusy(false);
+    try {
+      setResults(isBuiltinBible(library.id) ? await searchBuiltinBible(library.id, term.trim()) : await searchBible(library, term.trim()));
+    } catch (error) {
+      notify(error instanceof Error ? error.message : "성경 검색에 실패했습니다.");
+    } finally {
+      setBusy(false);
+    }
   };
-  return <ModalShell title="성구·원어코드 검색" subtitle="가져온 역본에서 단어나 H430, G3056 같은 코드를 찾습니다." onClose={onClose} wide>
+  return <ModalShell title="성구·원어코드 검색" subtitle="기본 역본과 개인 자료에서 단어나 H430, G3056 같은 코드를 찾습니다." onClose={onClose} wide>
     {searchable.length ? <><form className="search-form" onSubmit={(event) => void submit(event)}><select value={selectedId} onChange={(event) => setSelectedId(event.target.value)}>{searchable.map((library) => <option key={library.id} value={library.id}>{library.name}</option>)}</select><input autoFocus value={term} onChange={(event) => setTerm(event.target.value)} placeholder="예: 은혜 또는 H2580"/><button className="primary-button" disabled={busy}><Icon name="search"/>{busy ? "찾는 중" : "검색"}</button></form><div className="search-results">{results.map((result) => <button key={`${result.book}-${result.chapter}-${result.verse}`} onClick={() => onSelect({ book: result.book, chapter: result.chapter, verse: result.verse })}><strong>{formatReference(result)}</strong><p>{result.text}</p></button>)}{!busy && results.length === 0 && term && <div className="empty-list">검색 결과가 없습니다.</div>}</div></> : <div className="modal-empty"><Icon name="search" size={34}/><h3>검색할 베들레헴 역본이 필요합니다</h3><p>내 서재에서 `.bdb` 또는 `.sdb` 파일을 먼저 가져오세요.</p></div>}
   </ModalShell>;
 }

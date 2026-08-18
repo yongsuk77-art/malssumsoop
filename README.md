@@ -7,6 +7,7 @@
 ## 주요 기능
 
 - 구약 Open Scriptures Hebrew Bible, 신약 STEPBible TAGNT-TR 원문과 형태 분석
+- 한국어 성경 1910, WEB, YLT, ASV 공개 역본을 처음부터 기본 제공
 - 최대 4개 번역본 동시 비교와 장·절 동기화
 - 베들레헴 `.bdb`, `.sdb`, `.cdb`, `.dct`, `.hdb` 파일 직접 가져오기
 - 스트롱 코드 연결, 한글·영문 원어사전, 주석 검색
@@ -19,7 +20,7 @@
 
 ## 베들레헴 자료 연결
 
-앱에서 `자료실` → `베들레헴 자료 선택`을 누르고 여러 파일을 함께 선택합니다. 추천 순서는 다음과 같습니다.
+앱은 한글·영문 공개 역본 4종과 히브리어·헬라어 원문 분해를 별도 작업 없이 제공합니다. 추가로 보유한 자료가 있다면 `내 서재` → `내 베들레헴 자료 추가`를 누르고 여러 파일을 함께 선택합니다. 추천 순서는 다음과 같습니다.
 
 1. `01개역개정.bdb` — 주로 읽을 번역본
 2. `개역개정S.sdb` — 번역 어절과 스트롱 코드 연결
@@ -59,7 +60,7 @@ npm run build
 npm run dev
 ```
 
-공개 원문 자료를 다시 생성할 때는 원본 패키지와 WEB SQLite 파일을 `.source` 아래에 둔 뒤 `node scripts/build_open_data.mjs`를 실행합니다. `.source`와 베들레헴 확장자는 Git에서 제외됩니다.
+공개 원문 자료를 다시 생성할 때는 원본 패키지와 WEB SQLite 파일을 `.source` 아래에 둔 뒤 `node scripts/build_open_data.mjs`를 실행합니다. eBible VPL 역본은 `node scripts/build_vpl_bible.mjs <vpl.txt> <output-id> <source> "Public Domain"`으로 변환합니다. `.source`와 베들레헴 확장자는 Git에서 제외됩니다.
 
 ## Cloudflare 배포
 
