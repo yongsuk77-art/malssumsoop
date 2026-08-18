@@ -1,4 +1,4 @@
-export type LibraryKind = "bible" | "strong-bible" | "original" | "commentary" | "lexicon" | "hymnal";
+export type LibraryKind = "bible" | "strong-bible" | "original" | "commentary" | "lexicon" | "hymnal" | "hymnal-score";
 
 export type LibraryMeta = {
   id: string;
@@ -11,7 +11,7 @@ export type LibraryMeta = {
 };
 
 export type LibraryStored = LibraryMeta & {
-  bytes: ArrayBuffer;
+  bytes: ArrayBuffer | Blob;
 };
 
 export type BibleVerse = {

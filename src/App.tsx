@@ -4,7 +4,9 @@ import { BUILTIN_BIBLES, BUILTIN_STUDY_RESOURCES, DEFAULT_BIBLE_IDS, isBuiltinBi
 import {
   deleteLibrary,
   importBethlehemFile,
+  isSupportedBethlehemFileName,
   queryChapter,
+  queryHymnScore,
   queryHymns,
   queryLexicon,
   queryTaggedVerse,
@@ -36,6 +38,7 @@ const KIND_LABEL: Record<LibraryMeta["kind"], string> = {
   commentary: "주석",
   lexicon: "원어 사전",
   hymnal: "찬송가",
+  "hymnal-score": "찬송가 악보",
 };
 
 function initialBibleIds(): string[] {
@@ -125,7 +128,7 @@ function App() {
   const scriptureScrollRef = useRef<HTMLDivElement>(null);
 
   const book = bookByNumber(reference.book);
-  const bibleLibraries = useMemo(() => [...BUILTIN_BIBLES, ...libraries.filter((library) => library.kind === "bible" || library.kind === "strong-bible")], [libraries]);
+  const bibleLibraries = useMemo(() => [...BUILTIN_BIBLES, ...libraries.filter((library) => ["bible", "strong-bible", "original"].includes(library.kind))], [libraries]);
   const selectedLibraries = useMemo(() => selectedBibleIds.flatMap((id) => bibleLibraries.find((library) => library.id === id) || []), [selectedBibleIds, bibleLibraries]);
   const lexiconLibrary = useMemo(() => libraries.find((library) => library.kind === "lexicon" && /Ko|한|국/i.test(library.name)) || libraries.find((library) => library.kind === "lexicon"), [libraries]);
   const strongLibrary = useMemo(() => libraries.find((library) => library.kind === "strong-bible"), [libraries]);
@@ -471,26 +474,68 @@ function ModalShell({ title, subtitle, onClose, children, wide = false }: { titl
 function LibraryModal({ libraries, onClose, onChanged, notify }: { libraries: LibraryMeta[]; onClose: () => void; onChanged: () => Promise<void>; notify: (message: string) => void }) {
   const [busy, setBusy] = useState(false);
   const [progress, setProgress] = useState("");
+  const [report, setReport] = useState<{ title: string; details: string[] }>();
   const fileRef = useRef<HTMLInputElement>(null);
+  const folderRef = useRef<HTMLInputElement>(null);
+  const cancelRef = useRef(false);
   const importFiles = async (event: ChangeEvent<HTMLInputElement>) => {
-    const files = [...(event.target.files || [])];
-    if (!files.length) return;
+    const chosen = [...(event.target.files || [])];
+    const files = chosen.filter((file) => isSupportedBethlehemFileName(file.name));
+    const ignored = chosen.length - files.length;
+    if (!files.length) {
+      notify("가져올 수 있는 베들레헴 자료가 없습니다.");
+      event.target.value = "";
+      return;
+    }
     setBusy(true);
-    let imported = 0;
+    setReport(undefined);
+    cancelRef.current = false;
+    let added = 0;
+    let replaced = 0;
+    const failures: string[] = [];
+    const existingByName = new Map(libraries.map((library) => [library.fileName.toLocaleLowerCase(), library]));
     try {
-      for (const file of files) {
-        setProgress(`${file.name} · 파일 읽는 중`);
+      await navigator.storage?.persist?.().catch(() => false);
+      const estimate = await navigator.storage?.estimate?.().catch(() => undefined);
+      const additionalBytes = files.reduce((total, file) => {
+        const existing = existingByName.get(file.name.toLocaleLowerCase());
+        return total + Math.max(0, file.size - (existing?.size || 0));
+      }, 0);
+      const available = estimate?.quota === undefined ? undefined : estimate.quota - (estimate.usage || 0);
+      if (available !== undefined && additionalBytes > available) {
+        const needed = (additionalBytes / 1024 / 1024).toFixed(0);
+        const free = (available / 1024 / 1024).toFixed(0);
+        throw new Error(`브라우저 저장 공간이 부족합니다. 약 ${needed}MB가 필요하지만 ${free}MB만 사용할 수 있습니다.`);
+      }
+
+      for (const [index, file] of files.entries()) {
+        if (cancelRef.current) break;
+        const existing = existingByName.get(file.name.toLocaleLowerCase());
+        setProgress(`${index + 1}/${files.length} · ${file.name} · 파일 읽는 중`);
         try {
-          await importBethlehemFile(file, (stage) => setProgress(`${file.name} · ${stage}`));
-          imported += 1;
+          const library = await importBethlehemFile(file, (stage) => setProgress(`${index + 1}/${files.length} · ${file.name} · ${stage}`), existing?.id);
+          existingByName.set(file.name.toLocaleLowerCase(), library);
+          if (existing) replaced += 1;
+          else added += 1;
         } catch (error) {
-          notify(error instanceof Error ? error.message : `${file.name} 가져오기 실패`);
+          failures.push(error instanceof Error ? error.message : `${file.name}: 가져오기 실패`);
         }
       }
       await onChanged();
-      if (imported) notify(`${imported}개 자료를 내 서재에 추가했습니다.`);
+      const completed = added + replaced;
+      const stopped = cancelRef.current ? " · 사용자 중지" : "";
+      const title = `${completed}개 처리 완료 (새 자료 ${added} · 갱신 ${replaced} · 실패 ${failures.length})${stopped}`;
+      const details = [
+        ...(ignored ? [`관련 없는 파일 ${ignored}개는 자동으로 제외했습니다.`] : []),
+        ...failures.slice(0, 6),
+        ...(failures.length > 6 ? [`그 밖의 실패 ${failures.length - 6}개`] : []),
+      ];
+      setReport({ title, details });
+      if (completed) notify(`${completed}개 베들레헴 자료를 이 기기에 등록했습니다.`);
     } catch (error) {
-      notify(error instanceof Error ? error.message : "서재 목록을 새로 고치지 못했습니다.");
+      const message = error instanceof Error ? error.message : "서재 목록을 새로 고치지 못했습니다.";
+      setReport({ title: "가져오기를 시작하지 못했습니다.", details: [message] });
+      notify(message);
     } finally {
       setBusy(false);
       setProgress("");
@@ -504,14 +549,19 @@ function LibraryModal({ libraries, onClose, onChanged, notify }: { libraries: Li
   };
   return <ModalShell title="내 베들레헴 서재" subtitle="기본 자료는 바로 사용하고, 보유한 자료만 이 기기에 추가합니다." onClose={onClose} wide>
     <div className="privacy-banner"><Icon name="shield"/><div><strong>기본 자료는 서버에서 제공되고 개인 파일은 이 기기에만 저장됩니다</strong><p>개인 파일은 외부로 업로드되지 않으며 언제든 삭제할 수 있습니다. 통찰 생성 때만 선택 절과 분석용 문맥이 Cloudflare AI로 전송됩니다.</p></div></div>
-    <button className="import-zone" onClick={() => fileRef.current?.click()} disabled={busy}><span><Icon name="upload" size={30}/></span><strong>{busy ? progress : "내 베들레헴 자료 추가 (선택)"}</strong><small>.bdb · .sdb · .cdb · .dct · .hdb — 여러 파일 동시 선택 가능</small></button>
-    <input ref={fileRef} hidden type="file" multiple accept=".bdb,.sdb,.cdb,.dct,.hdb" onChange={(event) => void importFiles(event)}/>
+    <div className="import-area">
+      <button className="import-zone" onClick={() => folderRef.current?.click()} disabled={busy}><span><Icon name="upload" size={30}/></span><strong>{busy ? progress : "베들레헴 폴더 전체 가져오기"}</strong><small>폴더를 한 번 선택하면 성경·원문·사전·주석·찬송가·악보를 차례로 등록합니다.</small></button>
+      <div className="import-options"><button className="soft-button" onClick={() => fileRef.current?.click()} disabled={busy}>필요한 파일만 선택</button>{busy && <button className="soft-button danger" onClick={() => { cancelRef.current = true; setProgress("현재 파일 저장 후 중지합니다…"); }}>가져오기 중지</button>}</div>
+    </div>
+    <input ref={fileRef} hidden type="file" multiple accept=".bdb,.sdb,.cdb,.dct,.hdb,.cmp" onChange={(event) => void importFiles(event)}/>
+    <input ref={(node) => { folderRef.current = node; node?.setAttribute("webkitdirectory", ""); node?.setAttribute("directory", ""); }} hidden type="file" multiple accept=".bdb,.sdb,.cdb,.dct,.hdb,.cmp" onChange={(event) => void importFiles(event)}/>
+    {report && <div className={`import-report ${report.details.length ? "has-details" : ""}`}><strong>{report.title}</strong>{report.details.map((detail, index) => <p key={`${index}-${detail}`}>{detail}</p>)}</div>}
     <div className="library-list">
       <div className="library-list-head"><strong>처음부터 제공되는 기본 자료</strong><span>{BUILTIN_BIBLES.length + BUILTIN_STUDY_RESOURCES.length}개</span></div>
       {BUILTIN_BIBLES.map((library) => <div className="library-item" key={library.id}><span className="file-icon kind-bible"><Icon name="book"/></span><div><strong>{library.name}</strong><small>{library.description} · {library.license}</small></div><span className="default-badge">기본</span></div>)}
       {BUILTIN_STUDY_RESOURCES.map((resource) => <div className="library-item" key={resource.id}><span className="file-icon kind-original"><Icon name="language"/></span><div><strong>{resource.name}</strong><small>{resource.description}</small></div><span className="default-badge">기본</span></div>)}
       <div className="library-list-head secondary"><strong>내가 가져온 개인 자료</strong><span>{libraries.length}개</span></div>
-      {libraries.length ? libraries.map((library) => <div className="library-item" key={library.id}><span className={`file-icon kind-${library.kind}`}><Icon name={library.kind === "hymnal" ? "hymn" : library.kind === "lexicon" ? "language" : "book"}/></span><div><strong>{library.name}</strong><small>{KIND_LABEL[library.kind]} · {(library.size / 1024 / 1024).toFixed(1)}MB</small></div><button className="icon-button subtle danger" onClick={() => void remove(library)} aria-label="삭제"><Icon name="trash" size={18}/></button></div>) : <div className="empty-list">추가한 개인 자료가 없습니다. 기본 자료는 위에서 바로 사용할 수 있습니다.</div>}
+      {libraries.length ? libraries.map((library) => <div className="library-item" key={library.id}><span className={`file-icon kind-${library.kind}`}><Icon name={library.kind === "hymnal" || library.kind === "hymnal-score" ? "hymn" : library.kind === "lexicon" ? "language" : "book"}/></span><div><strong>{library.name}</strong><small>{KIND_LABEL[library.kind]} · {(library.size / 1024 / 1024).toFixed(1)}MB</small></div><button className="icon-button subtle danger" onClick={() => void remove(library)} aria-label={`${library.name} 삭제`}><Icon name="trash" size={18}/></button></div>) : <div className="empty-list">추가한 개인 자료가 없습니다. 기본 자료는 위에서 바로 사용할 수 있습니다.</div>}
     </div>
     <div className="format-guide"><strong>추천 가져오기 순서</strong><ol><li><span>1</span><div><b>01개역개정.bdb</b><small>주로 읽을 한글 본문</small></div></li><li><span>2</span><div><b>개역개정S.sdb</b><small>번역 어절과 스트롱 코드 연결</small></div></li><li><span>3</span><div><b>HebGrkKo.dct</b><small>한글 히브리어·헬라어 사전</small></div></li><li><span>4</span><div><b>새찬송가.hdb</b><small>찬송가 제목과 가사</small></div></li></ol></div>
   </ModalShell>;
@@ -543,17 +593,43 @@ function SearchModal({ libraries, onClose, onSelect, notify }: { libraries: Libr
 
 function HymnModal({ libraries, onClose, onOpenLibrary }: { libraries: LibraryMeta[]; onClose: () => void; onOpenLibrary: () => void }) {
   const hymnals = libraries.filter((library) => library.kind === "hymnal");
+  const scores = libraries.filter((library) => library.kind === "hymnal-score");
   const [selectedId, setSelectedId] = useState(hymnals[0]?.id || "");
   const [query, setQuery] = useState("");
   const [hymns, setHymns] = useState<Hymn[]>([]);
   const [selected, setSelected] = useState<Hymn>();
+  const [view, setView] = useState<"lyrics" | "score">("lyrics");
+  const [scoreUrl, setScoreUrl] = useState("");
+  const [scoreStatus, setScoreStatus] = useState("");
+  const selectedHymnal = hymnals.find((library) => library.id === selectedId);
+  const scoreLibrary = scores.find((library) => library.name === selectedHymnal?.name);
   useEffect(() => {
     if (!selectedId) return;
-    const timer = window.setTimeout(() => void queryHymns(selectedId, query).then((rows) => { setHymns(rows); setSelected((current) => current || rows[0]); }), 180);
+    const timer = window.setTimeout(() => void queryHymns(selectedId, query)
+      .then((rows) => { setHymns(rows); setSelected((current) => current || rows[0]); })
+      .catch(() => { setHymns([]); setSelected(undefined); }), 180);
     return () => window.clearTimeout(timer);
   }, [query, selectedId]);
+  useEffect(() => {
+    setScoreUrl("");
+    setScoreStatus(scoreLibrary ? "악보를 불러오는 중입니다…" : "");
+    if (!scoreLibrary || !selected) return;
+    let active = true;
+    let url = "";
+    void queryHymnScore(scoreLibrary.id, selected.number).then((blob) => {
+      if (!active) return;
+      if (!blob) {
+        setScoreStatus("이 번호의 악보 이미지가 없습니다.");
+        return;
+      }
+      url = URL.createObjectURL(blob);
+      setScoreUrl(url);
+      setScoreStatus("");
+    }).catch(() => { if (active) setScoreStatus("악보를 읽지 못했습니다. 악보 파일을 다시 가져와 주세요."); });
+    return () => { active = false; if (url) URL.revokeObjectURL(url); };
+  }, [scoreLibrary, selected]);
   return <ModalShell title="찬송가" subtitle="번호, 제목 또는 가사로 찾을 수 있습니다." onClose={onClose} wide>
-    {hymnals.length ? <div className="hymn-browser"><aside><div className="hymn-filters"><select value={selectedId} onChange={(event) => { setSelectedId(event.target.value); setSelected(undefined); }}>{hymnals.map((library) => <option key={library.id} value={library.id}>{library.name}</option>)}</select><div><Icon name="search" size={17}/><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="제목이나 가사 검색"/></div></div><div className="hymn-list">{hymns.map((hymn) => <button key={hymn.number} className={selected?.number === hymn.number ? "active" : ""} onClick={() => setSelected(hymn)}><span>{hymn.number}</span><strong>{hymn.title}</strong></button>)}</div></aside><article className="hymn-page">{selected ? <><span className="hymn-number">찬송 {selected.number}장</span><h3>{selected.title}</h3><div className="hymn-rule"/><p>{selected.text}</p></> : <div className="empty-list">찬송가를 선택하세요.</div>}</article></div> : <div className="modal-empty"><span className="large-round"><Icon name="hymn" size={34}/></span><h3>찬송가 가사 파일을 연결하세요</h3><p>`새찬송가.hdb` 또는 `찬미가.hdb`를 가져오면<br/>번호·제목·가사 검색을 사용할 수 있습니다.</p><button className="primary-button" onClick={onOpenLibrary}><Icon name="upload"/> 찬송가 가져오기</button></div>}
+    {hymnals.length ? <div className="hymn-browser"><aside><div className="hymn-filters"><select value={selectedId} onChange={(event) => { setSelectedId(event.target.value); setSelected(undefined); setView("lyrics"); }}>{hymnals.map((library) => <option key={library.id} value={library.id}>{library.name}</option>)}</select><div><Icon name="search" size={17}/><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="제목이나 가사 검색"/></div></div><div className="hymn-list">{hymns.map((hymn) => <button key={hymn.number} className={selected?.number === hymn.number ? "active" : ""} onClick={() => setSelected(hymn)}><span>{hymn.number}</span><strong>{hymn.title}</strong></button>)}</div></aside><article className="hymn-page">{selected ? <><span className="hymn-number">찬송 {selected.number}장</span><h3>{selected.title}</h3><div className="hymn-rule"/>{scoreLibrary && <div className="hymn-view-tabs"><button className={view === "lyrics" ? "active" : ""} onClick={() => setView("lyrics")}>가사</button><button className={view === "score" ? "active" : ""} onClick={() => setView("score")}>악보</button></div>}{view === "score" && scoreLibrary ? scoreUrl ? <img className="hymn-score" src={scoreUrl} alt={`${selected.title} 악보`}/> : <div className="empty-list">{scoreStatus}</div> : <p>{selected.text}</p>}</> : <div className="empty-list">찬송가를 선택하세요.</div>}</article></div> : <div className="modal-empty"><span className="large-round"><Icon name="hymn" size={34}/></span><h3>찬송가 가사 파일을 연결하세요</h3><p>`새찬송가.hdb` 또는 `찬미가.hdb`를 가져오면<br/>번호·제목·가사 검색을 사용할 수 있습니다.</p><button className="primary-button" onClick={onOpenLibrary}><Icon name="upload"/> 찬송가 가져오기</button></div>}
   </ModalShell>;
 }
 
